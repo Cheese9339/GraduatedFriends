@@ -19,13 +19,8 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 app = Flask(__name__)
-# 允許本機開發常用的 origin（Live Server / python -m http.server）
 CORS(app, origins=[
-    "http://127.0.0.1:5500",
-    "http://localhost:5500",
-    "http://127.0.0.1:8000",
-    "http://localhost:8000",
-    "http://127.0.0.1:5000",
+    "https://storage.googleapis.com"
 ], supports_credentials=True)
 engine = create_engine(
     DATABASE_URL,
