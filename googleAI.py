@@ -7,16 +7,29 @@ import requests
 import base64
 import random
 import tempfile
+import google.auth
 from google.cloud import vision
 from google import genai
 from google.genai.types import HttpOptions, GenerateContentConfig
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = r"F:\Codings\Python_Codes\Python工作區\專案區\研究生好朋友\BackEnd\sinuous-origin-454613-h1-1e815e48efbc.json"
-os.environ["GOOGLE_CLOUD_PROJECT"] = "sinuous-origin-454613-h1"
-os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
-os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "True"
+# 使用 Application Default Credentials (ADC)
+# 在 Cloud Run 上會自動使用服務帳戶的憑證，不需要 API KEY
+# 在本地開發時，可以通過環境變數 GOOGLE_APPLICATION_CREDENTIALS 或 gcloud auth application-default login 設置
+credentials, project = google.auth.default()
+
+# 設置專案和位置（從環境變數讀取，如果沒有則使用預設值）
+os.environ["GOOGLE_CLOUD_PROJECT"] = os.getenv("GOOGLE_CLOUD_PROJECT", project or "sinuous-origin-454613-h1")
+os.environ["GOOGLE_CLOUD_LOCATION"] = os.getenv("GOOGLE_CLOUD_LOCATION", "global")
+os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "True")
+
+
+def get_genai_client():
+    """獲取配置好的 genai.Client，使用 Application Default Credentials"""
+    # 當 GOOGLE_GENAI_USE_VERTEXAI=True 時，genai.Client 會自動使用 ADC
+    # 如果需要明確傳遞憑證，可以通過 HttpOptions 傳遞
+    return genai.Client(http_options=HttpOptions(api_version="v1"))
 
 COMMON_USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -131,7 +144,7 @@ def read_student_id(image_path):
 
 def parse_ocr_with_google_ai(ocr_text):
     """使用 Gemini 解析 OCR 文字"""
-    client = genai.Client(http_options=HttpOptions(api_version="v1"))
+    client = get_genai_client()
     MODEL_NAME = "gemini-2.5-flash"
     
     prompt = (
@@ -177,7 +190,7 @@ def parse_namelist_from_url(url, school_dep):
     if not text_content:
         return {"error": "HTML 內容為空或無法解析"}
     
-    client = genai.Client(http_options=HttpOptions(api_version="v1"))
+    client = get_genai_client()
     MODEL_NAME = "gemini-2.5-flash"
     
     prompt = (
@@ -240,7 +253,7 @@ def parse_namelist_from_url(url, school_dep):
 def parse_namelist_from_file(file_path, school_dep):
     """從檔案解析名單"""
 
-    client = genai.Client(http_options=HttpOptions(api_version="v1"))
+    client = get_genai_client()
     MODEL_NAME = "gemini-2.5-flash"
     
     try:
