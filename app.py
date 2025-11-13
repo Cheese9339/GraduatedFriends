@@ -478,11 +478,10 @@ def api_upload_namelist():
        
        namelist 欄位儲存為 JSON dict：{"degree1": "name1,name2", "degree2": "name3,name4"}
     """
-    data = request.get_json() or {}
-    file = data.get('file')
-    school = data.get('school')
-    department = data.get('department')
-    degree = data.get('degree')
+    file = request.files.get('file')
+    school = request.form.get('school')
+    department = request.form.get('department')
+    degree = request.form.get('degree')
     
     if not school or not department or not degree:
         return jsonify({"success": False, "message": "需要提供 school、department 和 degree 參數"}), 400
