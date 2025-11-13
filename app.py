@@ -20,7 +20,8 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 app = Flask(__name__)
 CORS(app, origins=[
-    "https://storage.googleapis.com"
+    "https://storage.googleapis.com",
+    "https://storage.googleapis.com/graduatedfriends"
 ], supports_credentials=True)
 engine = create_engine(
     DATABASE_URL,
