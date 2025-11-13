@@ -341,7 +341,7 @@ def parse_namelist_from_file(file_path, school_dep):
         parsed = json.loads(clean_json_str)
 
         if isinstance(parsed.get('names'), list):
-            has_names = parsed.get('names_available', True)
+            has_names = parsed.get('names_available', False)
             return {"success": True, "names": parsed['names'], "has_names": has_names}
         else:
             return {"error": "回傳格式不符合 {'names': [...], 'names_available': bool}"}

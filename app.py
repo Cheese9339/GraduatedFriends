@@ -377,16 +377,26 @@ def api_get_degrees():
 @app.route('/api/check_namelist', methods=['GET'])
 @token_required
 def api_check_namelist():
-    """檢查指定系所是否有名單，以及名單狀態。
-       Query params: school, department
-       回傳：{ has_namelist: true/false, namelist: "..." }
+    """檢查指定系所 + 學制 的名單狀態。
+       Query params: school, department, degree
+       回傳：
+       {
+           "success": true,
+           "has_namelist": true/false,
+           "degree": "碩士班",
+           "namelist": {"names": "A,B,C", "has_names": true}
+       }
     """
     school = request.args.get('school')
     department = request.args.get('department')
-    
-    if not school or not department:
-        return jsonify({"success": False, "message": "需要提供 school 和 department 參數"}), 400
-    
+    degree = request.args.get('degree')
+
+    if not school or not department or not degree:
+        return jsonify({
+            "success": False,
+            "message": "需要提供 school、department 和 degree 參數"
+        }), 400
+
     try:
         with engine.begin() as conn:
             sql = text("""
@@ -395,29 +405,66 @@ def api_check_namelist():
                 WHERE school = :school AND dep_name = :department
                 LIMIT 1
             """)
-            row = conn.execute(sql, {"school": school, "department": department}).mappings().fetchone()
-            
+            row = conn.execute(sql, {
+                "school": school,
+                "department": department
+            }).mappings().fetchone()
+
+            # 查不到該系所
             if not row:
                 return jsonify({
                     "success": True,
                     "has_namelist": False,
-                    "message": "該系所暫無名單，請上傳"
+                    "message": "該系所不存在或尚未建立資料"
                 }), 200
-            
-            namelist = row['namelist']
-            if not namelist or namelist.strip() == '':
+
+            namelist_raw = row['namelist']
+
+            # 無名單
+            if not namelist_raw or namelist_raw.strip() == '':
                 return jsonify({
                     "success": True,
                     "has_namelist": False,
-                    "message": "該系所暫無名單，請上傳"
+                    "message": f"{degree} 學制暫無名單，請上傳"
                 }), 200
-            
+
+            # 嘗試解析 JSON 格式
+            # try:
+            namelist_dict = json.loads(namelist_raw)
+            # except Exception:
+            #     # 舊格式相容：只有一個名單字串時
+            #     namelist_dict = {
+            #         "預設": {"names": namelist_raw, "has_names": True}
+            #     }
+
+            # 檢查指定 degree 是否存在
+            degree_data = namelist_dict.get(degree)
+
+            if not degree_data or not degree_data.get("names"):
+                return jsonify({
+                    "success": True,
+                    "has_namelist": False,
+                    "message": f"{degree} 學制暫無名單，請上傳"
+                }), 200
+
+            # 判斷是否有實際姓名
+            has_names = degree_data.get("has_names", True)
+            names_str = degree_data.get("names", "").strip()
+
+            if not names_str:
+                return jsonify({
+                    "success": True,
+                    "has_namelist": False,
+                    "message": f"{degree} 學制名單為空，請上傳"
+                }), 200
+
             return jsonify({
                 "success": True,
                 "has_namelist": True,
-                "namelist": namelist
+                "degree": degree,
+                "namelist": degree_data
             }), 200
-            
+
     except Exception as e:
         return jsonify({"success": False, "message": f"檢查名單失敗: {str(e)}"}), 500
 
@@ -490,7 +537,7 @@ def api_upload_namelist():
             }), 404
         
         # 檢查是否有實際人名
-        has_names = result.get('has_names', True)
+        has_names = result.get('has_names')
         
         # 將名單存入 schools 表的 namelist 欄位（JSON 格式）
         # 名單格式：{"degree": {"names": [...], "has_names": bool}}
@@ -512,13 +559,13 @@ def api_upload_namelist():
             # 初始化或更新 namelist dict，保留其他 degree
             namelist_dict = {}
             if row and row['namelist']:
-                try:
-                    namelist_dict = json.loads(row['namelist'])
-                except Exception:
-                    # 若原本是逗號分隔字串，則存到 '預設' key
-                    old_str = row['namelist']
-                    if old_str.strip():
-                        namelist_dict['預設'] = {"names": old_str, "has_names": True}
+                # try:
+                namelist_dict = json.loads(row['namelist'])
+                # except Exception:
+                #     # 若原本是逗號分隔字串，則存到 '預設' key
+                #     old_str = row['namelist']
+                #     if old_str.strip():
+                #         namelist_dict['預設'] = {"names": old_str, "has_names": True}
 
             # 只更新指定 degree 的名單（新格式：包含 names 和 has_names）
             namelist_dict[degree] = {
@@ -788,7 +835,7 @@ def api_user_department_stats():
             if row and row.get('namelist'):
                 try:
                     namelist_dict = json.loads(row['namelist'])
-                    deg_list_str = namelist_dict.get(degree, '')
+                    deg_list_str = json.loads(namelist_dict.get(degree, '')).get("names")
                 except Exception:
                     deg_list_str = row['namelist']
 
