@@ -13,6 +13,7 @@ from google import genai
 from google.genai.types import HttpOptions, GenerateContentConfig
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
+from pdfminer.high_level import extract_text
 
 # 使用 Application Default Credentials (ADC)
 # 在 Cloud Run 上會自動使用服務帳戶的憑證，不需要 API KEY
@@ -251,20 +252,20 @@ def parse_namelist_from_url(url, school_dep):
 
 
 def parse_namelist_from_file(file_path, school_dep):
-    """從檔案解析名單"""
+    """從檔案解析名單（PDF先轉文字）"""
 
     client = get_genai_client()
     MODEL_NAME = "gemini-2.5-flash"
-    
+
     try:
         with open(file_path, 'rb') as f:
             file_content = f.read()
     except Exception as e:
         return {"error": f"無法讀取檔案: {str(e)}"}
-    
+
     _, ext = os.path.splitext(file_path)
     ext = ext.lower()
-    
+
     mime_types = {
         '.pdf': 'application/pdf',
         '.jpg': 'image/jpeg',
@@ -274,66 +275,77 @@ def parse_namelist_from_file(file_path, school_dep):
         '.xls': 'application/vnd.ms-excel',
     }
     mime_type = mime_types.get(ext, 'application/octet-stream')
-    
-    prompt = (
-        f"請先檢查這份檔案內容有沒有包含「{school_dep}」的名單。\n"
-        f"如果檔案未包含「{school_dep}」的名單，請**直接回傳純文字訊息：「檔案未包含{school_dep}名單」**，不要回傳 JSON 或任何其他內容。\n"
-        "如果包含，請繼續並**只提取該系所的名單**，忽略檔案中其他系所的資訊。\n\n"
-        "如果用戶上傳「聯招」即聯合招生的名單，且名單無明確指出包含之系所，"
-        "可以放寬以上系所的限制，若「名單包含該系所」是合理的，就可以繼續。"
 
+    # === Step 1: 處理 PDF 類型 ===
+    if ext == '.pdf':
+        try:
+            extracted_text = extract_text(file_path)
+            if not extracted_text.strip():
+                return {"error": "PDF 無文字層或為掃描圖片"}
+            # 用抽取到的文字取代原始檔案內容
+            content_parts = [{"text": extracted_text}]
+        except Exception as e:
+            return {"error": f"PDF 文字層提取失敗: {str(e)}"}
+    else:
+        # 非 PDF 類型，仍以檔案方式送出
+        file_data = base64.standard_b64encode(file_content).decode('utf-8')
+        content_parts = [{
+            "inline_data": {
+                "mime_type": mime_type,
+                "data": file_data,
+            }
+        }]
+
+    # === Step 2: prompt（稍作修改，讓模型知道這是文字層） ===
+    prompt = (
+        f"請先檢查這份資料內容是否包含「{school_dep}」的名單。\n"
+        f"若資料未包含「{school_dep}」的名單，請**直接回傳純文字訊息：「檔案未包含{school_dep}名單」**。\n"
+        "若包含，請繼續並**只提取該系所的名單**，忽略其他系所資訊。\n\n"
+        "若這份資料是由 PDF 轉換而來的純文字，請容忍排版錯亂或多餘空白，不需理會頁碼、註解、或頁首頁尾。\n"
+        "若為『聯合招生、共同招生』名單且未明確標示系所，可放寬限制，若系所合理屬於該名單則繼續提取。\n\n"
         "重要提醒：請檢查名單中是否包含真實的學生人名。\n"
-        "- 如果名單主要由 准考證號碼、學號、編號 等組成，而沒有實際的中文人名，請標記為 'names_available: false'。\n"
-        "- 如果有實際的人名（即使被隱藏符遮蔽），請標記為 'names_available: true'。\n\n"
-        
+        "- 若名單主要由 准考證號碼、學號、編號 等組成，而沒有實際的中文人名，請標記 'names_available': false。\n"
+        "- 若有實際人名（即使有遮蔽符），請標記 'names_available': true。\n\n"
         "以下是提取名單的具體要求：\n"
         "這是一份台灣大學或研究所的學生名單。\n"
         "請提取所有學生人名或編號。\n"
-        "隱私遮蔽符（如 X、O、○、●、□、■、* 等）請一律替換為星號 *。\n"
-        "若名單中多數名字包含 * 而少數沒有，請合理推測那些缺少 * 的名字其實也有隱藏符（補上 *）。\n"
-        "例如：若名單有 張*睿、林*茹、盧嘉，請再次確認該人名，並推理最後一個視為 盧*嘉是否合理。\n"
-        "輸出格式：純 JSON，{'names': ['姓名1','姓名2',...], 'names_available': true/false}。\n"
-        "不要解釋，不要加註解，不要 ```json。\n"
+        "隱私遮蔽符（X、O、○、●、□、■、* 等）一律替換為星號 *。\n"
+        "若部分名字未被遮蔽但根據模式可推測應有遮蔽，請補上 *。\n"
+        "例如：張*睿、林*茹、盧嘉 → 合理輸出為 張*睿、林*茹、盧*嘉。\n\n"
+        "輸出格式：純 JSON，{'names': ['姓名1','姓名2',...], 'names_available': true/false}\n"
+        "不要加註解、不要 ```json。\n"
     )
-    
+
     config = GenerateContentConfig(temperature=0.0)
-    
+
     try:
-        file_data = base64.standard_b64encode(file_content).decode('utf-8')
-        
+        # === Step 3: 組合送出 ===
+        contents = [{
+            "role": "user",
+            "parts": content_parts + [{"text": prompt}]
+        }]
+
         response = client.models.generate_content(
             model=MODEL_NAME,
-            contents=[
-                {
-                    "role": "user",
-                    "parts": [
-                        {
-                            "inline_data": {
-                                "mime_type": mime_type,
-                                "data": file_data,
-                            }
-                        },
-                        {"text": prompt}
-                    ]
-                }
-            ],
+            contents=contents,
             config=config
         )
+
         raw_content = response.text.strip()
         expected_error_message = f"檔案未包含{school_dep}名單"
-        
+
         if raw_content == expected_error_message:
             return {"error": raw_content}
-            
+
         clean_json_str = clean_markdown_json(raw_content)
         parsed = json.loads(clean_json_str)
-        
+
         if isinstance(parsed.get('names'), list):
             has_names = parsed.get('names_available', True)
             return {"success": True, "names": parsed['names'], "has_names": has_names}
         else:
             return {"error": "回傳格式不符合 {'names': [...], 'names_available': bool}"}
-        
+
     except json.JSONDecodeError as e:
         return {
             "error": "JSON parse failed",
