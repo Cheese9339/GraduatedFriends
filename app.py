@@ -901,6 +901,38 @@ def api_submit_choices():
                     return jsonify({"success": False, "message": f"無效的 selection 格式: {sel}"}), 400
 
                 school, department = parts[0], parts[1]
+                
+                # 檢查該系所的 degree 欄位是否包含此 degree，若無則新增
+                check_degree_sql = text("""
+                    SELECT degree
+                    FROM schools
+                    WHERE school = :school AND dep_name = :department
+                    LIMIT 1
+                """)
+                degree_row = conn.execute(check_degree_sql, {
+                    "school": school,
+                    "department": department
+                }).mappings().fetchone()
+                
+                if degree_row:
+                    existing_degrees = degree_row.get('degree', '')
+                    degree_list = [d.strip() for d in existing_degrees.split(',') if d.strip()]
+                    
+                    # 如果此 degree 不在列表中，新增它
+                    if degree not in degree_list:
+                        degree_list.append(degree)
+                        new_degrees_str = ','.join(degree_list)
+                        update_degree_sql = text("""
+                            UPDATE schools
+                            SET degree = :degree
+                            WHERE school = :school AND dep_name = :department
+                        """)
+                        conn.execute(update_degree_sql, {
+                            "degree": new_degrees_str,
+                            "school": school,
+                            "department": department
+                        })
+                
                 insert_sql = text("""
                     INSERT INTO user_choices (user_id, rank, school, department, degree, created_at)
                     VALUES (:user_id, :rank, :school, :department, :degree, :created_at)
