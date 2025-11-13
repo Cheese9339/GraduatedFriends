@@ -232,20 +232,25 @@ def login():
             "iat": login_time
         }
         token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
-        response = jsonify({"success": True, "message": "登入成功"})
-        response.set_cookie("token", token, httponly=True, max_age=2*60*60, samesite="None", secure=True)
+        response = jsonify({"success": True, "message": "登入成功", "token": token})
         return response, 200
 # <<<<<<<<<<<<<<< login <<<<<<<<<<<<<<< #
 
 # >>>>>>>>>>>>>>> token verification >>>>>>>>>>>>>>> #
 @app.route('/api/verify_token', methods=['GET'])
 def verify_token():
-    token = request.cookies.get('token')
-    if not token:
-        return jsonify({"success": False, "message": "未登入"}), 401
+    auth_header = request.headers.get('Authorization')
     
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return jsonify({"success": False, "message": "未提供或格式錯誤的驗證 Token"}), 401
+    
+    token = auth_header.split(' ')[1]
+    
+    # 2. 驗證 Token
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+        
+        # 驗證成功
         return jsonify({
             "success": True,
             "user": {
@@ -254,33 +259,35 @@ def verify_token():
                 "email": payload["email"]
             }
         }), 200
+        
     except jwt.ExpiredSignatureError:
-        response = jsonify({"success": False, "message": "登入已過期"}), 401
-        response[0].delete_cookie('token')
-        return response
+        return jsonify({"success": False, "message": "登入已過期"}), 401
+        
     except jwt.InvalidTokenError:
-        response = jsonify({"success": False, "message": "無效的登入狀態"}), 401
-        response[0].delete_cookie('token')
-        return response
+        return jsonify({"success": False, "message": "無效的登入狀態"}), 401
 
 def token_required(f):
     from functools import wraps
     @wraps(f)
     def decorated(*args, **kwargs):
-        token = request.cookies.get('token')
-        if not token:
+        auth_header = request.headers.get('Authorization')
+        
+        if not auth_header or not auth_header.startswith('Bearer '):
             return jsonify({"success": False, "message": "請先登入"}), 401
+        
+        token = auth_header.split(' ')[1]
+        
         try:
             jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+            
         except jwt.ExpiredSignatureError:
-            response = jsonify({"success": False, "message": "登入已過期"}), 401
-            response[0].delete_cookie('token')
-            return response
-        except:
-            response = jsonify({"success": False, "message": "無效的登入狀態"}), 401
-            response[0].delete_cookie('token')
-            return response
+            return jsonify({"success": False, "message": "登入已過期"}), 401
+            
+        except Exception:
+            return jsonify({"success": False, "message": "無效的登入狀態"}), 401
+            
         return f(*args, **kwargs)
+        
     return decorated
 
 # >>>>>>>>>>>>>>> schools / departments / lookup >>>>>>>>>>>>>>> #
@@ -652,7 +659,12 @@ def api_user_filled_departments():
     """取得該登入使用者填報過的所有系所（含學制、排名等）。
        回傳：{ success, departments: [{ school, department, degree, rank }, ...] }
     """
-    token = request.cookies.get('token')
+    auth_header = request.headers.get('Authorization')
+    
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return jsonify({"success": False, "message": "未提供或格式錯誤的驗證 Token"}), 401
+    
+    token = auth_header.split(' ')[1]
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"]) if token else None
         user_id = payload.get('user_id') if payload else None
@@ -698,7 +710,12 @@ def api_user_department_stats():
        Query params: school, department, degree
        回傳：{ user_rank, total_choices, namelist_count, first_choice, fifth_and_after }
     """
-    token = request.cookies.get('token')
+    auth_header = request.headers.get('Authorization')
+    
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return jsonify({"success": False, "message": "未提供或格式錯誤的驗證 Token"}), 401
+    
+    token = auth_header.split(' ')[1]
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"]) if token else None
         user_id = payload.get('user_id') if payload else None
@@ -798,7 +815,12 @@ def api_submit_choices():
        { choices: [ { selection: 'school/dep', degree: '碩士班' }, ... ] }
        改成每筆志願獨立存一列 (user_id, rank, school, dep, degree)
     """
-    token = request.cookies.get('token')
+    auth_header = request.headers.get('Authorization')
+    
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return jsonify({"success": False, "message": "未提供或格式錯誤的驗證 Token"}), 401
+    
+    token = auth_header.split(' ')[1]
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"]) if token else None
         user_id = payload.get('user_id') if payload else None
@@ -857,7 +879,12 @@ def api_submit_choices():
 @token_required
 def api_get_user_choices():
     """取得使用者已儲存的志願序（前端輸出格式不變）"""
-    token = request.cookies.get('token')
+    auth_header = request.headers.get('Authorization')
+    
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return jsonify({"success": False, "message": "未提供或格式錯誤的驗證 Token"}), 401
+    
+    token = auth_header.split(' ')[1]
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"]) if token else None
         user_id = payload.get('user_id') if payload else None
