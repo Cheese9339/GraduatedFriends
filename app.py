@@ -10,6 +10,7 @@ import os
 import jwt
 import tempfile
 import json
+import io
 import googleAI
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -474,12 +475,11 @@ def api_check_namelist():
 def api_upload_namelist():
     """上傳或解析名單，支援三種方式：
        1. 上傳檔案（PDF/圖片/Excel）- POST params: file (multipart), school, department, degree
-       2. 提供 URL - POST JSON: {url, school, department, degree}
-       3. 手動輸入名單 - POST JSON: {names: [...], school, department, degree}
        
        namelist 欄位儲存為 JSON dict：{"degree1": "name1,name2", "degree2": "name3,name4"}
     """
     data = request.get_json() or {}
+    file = data.get('file')
     school = data.get('school')
     department = data.get('department')
     degree = data.get('degree')
@@ -493,32 +493,30 @@ def api_upload_namelist():
     try:
         # 方式 1：檔案上傳
         if 'file' in request.files:
-            file = request.files['file']
             if file.filename == '':
                 return jsonify({"success": False, "message": "未提供檔案名稱"}), 400
-            
-            suffix = os.path.splitext(file.filename)[1] or '.pdf'
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-            file.save(tmp.name)
-            tmp.close()
-            
-            result = googleAI.parse_namelist_from_file(tmp.name, school+department+degree)
+
+            # 將檔案內容讀入記憶體
+            file_bytes = io.BytesIO(file.read())
+
+            # 呼叫你的 Google AI 方法（需支援 BytesIO）
+            result = googleAI.parse_namelist_from_file(file_bytes, school + department + degree)
         
-        # 方式 2：提供 URL
-        elif 'url' in (request.get_json() or {}):
-            url = request.get_json().get('url')
-            if not url:
-                return jsonify({"success": False, "message": "URL 不能為空"}), 400
+        # # 方式 2：提供 URL
+        # elif 'url' in (request.get_json() or {}):
+        #     url = request.get_json().get('url')
+        #     if not url:
+        #         return jsonify({"success": False, "message": "URL 不能為空"}), 400
             
-            result = googleAI.parse_namelist_from_url(url, school+department+degree)
+        #     result = googleAI.parse_namelist_from_url(url, school+department+degree)
         
-        # 方式 3：手動輸入名單
-        elif 'names' in (request.get_json() or {}):
-            names = request.get_json().get('names')
-            if not isinstance(names, list) or not names:
-                return jsonify({"success": False, "message": "names 必須是非空陣列"}), 401
+        # # 方式 3：手動輸入名單
+        # elif 'names' in (request.get_json() or {}):
+        #     names = request.get_json().get('names')
+        #     if not isinstance(names, list) or not names:
+        #         return jsonify({"success": False, "message": "names 必須是非空陣列"}), 401
             
-            result = {"success": True, "names": names}
+        #     result = {"success": True, "names": names}
         
         else:
             return jsonify({"success": False, "message": "請提供檔案、URL 或手動名單"}), 402
