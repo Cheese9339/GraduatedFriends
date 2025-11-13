@@ -495,8 +495,9 @@ def api_upload_namelist():
             if file.filename == '':
                 return jsonify({"success": False, "message": "未提供檔案名稱"}), 400
 
-            # 將檔案內容讀入記憶體
+            # 將檔案內容讀入記憶體，並保留檔案名稱（副檔名）
             file_bytes = io.BytesIO(file.read())
+            file_bytes.name = file.filename  # 保留原始檔案名稱，讓 googleAI 可以判斷副檔名
 
             # 呼叫你的 Google AI 方法（需支援 BytesIO）
             result = googleAI.parse_namelist_from_file(file_bytes, school + department + degree)
