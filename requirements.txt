@@ -1,18 +1,24 @@
 aistudio-sdk==0.3.8
 annotated-types==0.7.0
 anyio==4.11.0
+asttokens @ file:///home/conda/feedstock_root/build_artifacts/asttokens_1733250440834/work
 bce-python-sdk==0.9.50
 beautifulsoup4==4.14.2
 blinker==1.9.0
 cachetools==6.2.1
 certifi==2025.10.5
+cffi==2.0.0
 chardet==5.2.0
 charset-normalizer==3.4.4
 click==8.3.0
-colorama==0.4.6
+colorama @ file:///home/conda/feedstock_root/build_artifacts/colorama_1733218098505/work
 colorlog==6.10.1
+comm @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_comm_1753453984/work
+cryptography==46.0.3
+decorator @ file:///home/conda/feedstock_root/build_artifacts/decorator_1740384970518/work
 distro==1.9.0
 docstring_parser==0.17.0
+executing @ file:///home/conda/feedstock_root/build_artifacts/executing_1756729339227/work
 filelock==3.20.0
 Flask==3.1.2
 flask-cors==6.0.1
@@ -42,41 +48,55 @@ huggingface_hub==1.1.2
 idna==3.11
 imagesize==1.4.1
 itsdangerous==2.2.0
+jedi @ file:///home/conda/feedstock_root/build_artifacts/jedi_1733300866624/work
 Jinja2==3.1.6
 jiter==0.12.0
+jupyter_client @ file:///home/conda/feedstock_root/build_artifacts/jupyter_client_1733440914442/work
+jupyter_core @ file:///D:/bld/bld/rattler-build_jupyter_core_1760643889/work
 MarkupSafe==3.0.3
+matplotlib-inline @ file:///home/conda/feedstock_root/build_artifacts/matplotlib-inline_1761214490209/work
 modelscope==1.31.0
+nest_asyncio @ file:///home/conda/feedstock_root/build_artifacts/nest-asyncio_1733325553580/work
 networkx==3.5
 numpy==2.3.4
 openai==2.7.2
 opencv-contrib-python==4.10.0.84
 opt-einsum==3.3.0
-packaging==25.0
+packaging @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_packaging_1745345660/work
 paddleocr==3.3.1
 paddlepaddle==3.2.1
 paddlex==3.3.9
 pandas==2.3.3
+parso @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_parso_1755974222/work
 pdf2image==1.17.0
+pdfminer.six==20251107
 pillow==12.0.0
+platformdirs @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_platformdirs_1759953252/work
 prettytable==3.16.0
+prompt_toolkit @ file:///home/conda/feedstock_root/build_artifacts/prompt-toolkit_1756321756983/work
 proto-plus==1.26.1
 protobuf==6.33.0
-psutil==7.1.3
+psutil @ file:///D:/bld/bld/rattler-build_psutil_1762092931/work
 psycopg2-binary==2.9.11
+pure_eval @ file:///home/conda/feedstock_root/build_artifacts/pure_eval_1733569405015/work
 py-cpuinfo==9.0.0
 pyasn1==0.6.1
 pyasn1_modules==0.4.2
 pyclipper==1.3.0.post6
+pycparser==2.23
 pycryptodome==3.23.0
 pydantic==2.12.4
 pydantic_core==2.41.5
+Pygments @ file:///home/conda/feedstock_root/build_artifacts/pygments_1750615794071/work
 PyJWT==2.10.1
 pypdfium2==5.0.0
 python-bidi==0.6.7
-python-dateutil==2.9.0.post0
+python-dateutil @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_python-dateutil_1751104122/work
 python-dotenv==1.2.1
 pytz==2025.2
+pywin32 @ file:///D:/bld/bld/rattler-build_pywin32_1756487145/work
 PyYAML==6.0.2
+pyzmq @ file:///D:/bld/bld/rattler-build_pyzmq_1757387035/work
 requests==2.32.5
 rsa==4.9.1
 ruamel.yaml==0.18.16
@@ -84,19 +104,22 @@ ruamel.yaml.clib==0.2.14
 safetensors==0.6.2
 shapely==2.1.2
 shellingham==1.5.4
-six==1.17.0
+six @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_six_1753199211/work
 sniffio==1.3.1
 soupsieve==2.8
 SQLAlchemy==2.0.44
+stack_data @ file:///home/conda/feedstock_root/build_artifacts/stack_data_1733569443808/work
 tenacity==9.1.2
+tornado @ file:///D:/bld/tornado_1762506678249/work
 tqdm==4.67.1
+traitlets @ file:///home/conda/feedstock_root/build_artifacts/traitlets_1733367359838/work
 typer-slim==0.20.0
 typing-inspection==0.4.2
-typing_extensions==4.15.0
+typing_extensions @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_typing_extensions_1756220668/work
 tzdata==2025.2
 ujson==5.11.0
 urllib3==2.5.0
-wcwidth==0.2.14
+wcwidth @ file:///home/conda/feedstock_root/build_artifacts/wcwidth_1758622279606/work
 websockets==15.0.1
 Werkzeug==3.1.3
-gunicorn
+zipp @ file:///home/conda/feedstock_root/build_artifacts/zipp_1749421620841/work
