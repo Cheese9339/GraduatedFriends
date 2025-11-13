@@ -251,50 +251,60 @@ def parse_namelist_from_url(url, school_dep):
         return {"error": f"API call failed: {str(e)}"}
 
 
-def parse_namelist_from_file(file_path, school_dep):
-    """從檔案解析名單（PDF先轉文字）"""
+def parse_namelist_from_file(file_bytes: io.BytesIO, school_dep: str):
+    """從記憶體 BytesIO 檔案解析名單（PDF先轉文字）"""
 
     client = get_genai_client()
     MODEL_NAME = "gemini-2.5-flash"
 
     try:
-        with open(file_path, 'rb') as f:
-            file_content = f.read()
+        # 確保 BytesIO 指標在開頭
+        file_bytes.seek(0)
+        file_content = file_bytes.read()
     except Exception as e:
         return {"error": f"無法讀取檔案: {str(e)}"}
 
-    _, ext = os.path.splitext(file_path)
+    # 嘗試從 BytesIO 取得副檔名（若 Flask 傳入 file 物件可附上 filename）
+    ext = getattr(file_bytes, "name", None)
+    if ext:
+        _, ext = os.path.splitext(ext)
+    else:
+        ext = ""  # 若無檔名，略過副檔名邏輯
     ext = ext.lower()
 
     mime_types = {
-        '.pdf': 'application/pdf',
-        '.jpg': 'image/jpeg',
-        '.jpeg': 'image/jpeg',
-        '.png': 'image/png',
-        '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        '.xls': 'application/vnd.ms-excel',
+        ".pdf": "application/pdf",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".xls": "application/vnd.ms-excel",
     }
-    mime_type = mime_types.get(ext, 'application/octet-stream')
+    mime_type = mime_types.get(ext, "application/octet-stream")
 
     # === Step 1: 處理 PDF 類型 ===
-    if ext == '.pdf':
+    if ext == ".pdf":
         try:
-            extracted_text = extract_text(file_path)
+            # 直接從記憶體中提取 PDF 文字層
+            file_bytes.seek(0)
+            extracted_text = extract_text(file_bytes)
             if not extracted_text.strip():
                 return {"error": "PDF 無文字層或為掃描圖片"}
-            # 用抽取到的文字取代原始檔案內容
             content_parts = [{"text": extracted_text}]
         except Exception as e:
             return {"error": f"PDF 文字層提取失敗: {str(e)}"}
+
     else:
-        # 非 PDF 類型，仍以檔案方式送出
-        file_data = base64.standard_b64encode(file_content).decode('utf-8')
-        content_parts = [{
-            "inline_data": {
-                "mime_type": mime_type,
-                "data": file_data,
+        # 非 PDF 類型，轉成 base64 並傳給 Gemini
+        file_data = base64.standard_b64encode(file_content).decode("utf-8")
+        content_parts = [
+            {
+                "inline_data": {
+                    "mime_type": mime_type,
+                    "data": file_data,
+                }
             }
-        }]
+        ]
 
     # === Step 2: prompt（稍作修改，讓模型知道這是文字層） ===
     prompt = (
