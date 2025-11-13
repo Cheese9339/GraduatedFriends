@@ -232,7 +232,7 @@ def login():
         }
         token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
         response = jsonify({"success": True, "message": "登入成功"})
-        response.set_cookie("token", token, httponly=True, max_age=2*60*60, samesite="None")
+        response.set_cookie("token", token, httponly=True, max_age=2*60*60, samesite="Lax")
         return response, 200
 # <<<<<<<<<<<<<<< login <<<<<<<<<<<<<<< #
 
