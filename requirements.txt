@@ -1,7 +1,6 @@
 aistudio-sdk==0.3.8
 annotated-types==0.7.0
 anyio==4.11.0
-asttokens @ file:///home/conda/feedstock_root/build_artifacts/asttokens_1733250440834/work
 bce-python-sdk==0.9.50
 beautifulsoup4==4.14.2
 blinker==1.9.0
