@@ -252,7 +252,7 @@ def parse_namelist_from_url(url, school_dep):
 
 
 def parse_namelist_from_file(file_bytes: io.BytesIO, school_dep: str):
-    """從記憶體 BytesIO 檔案解析名單（PDF先轉文字）"""
+    """從記憶體 BytesIO 檔案解析名單（PDF先轉文字，其他直接傳檔案）"""
 
     client = get_genai_client()
     MODEL_NAME = "gemini-2.5-flash"
@@ -280,7 +280,7 @@ def parse_namelist_from_file(file_bytes: io.BytesIO, school_dep: str):
         ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         ".xls": "application/vnd.ms-excel",
     }
-    mime_type = mime_types.get(ext, "application/octet-stream")
+    mime_type = mime_types.get(ext, "image/jpeg")  # 預設為 jpeg，避免 application/octet-stream
 
     # === Step 1: 處理 PDF 類型 ===
     if ext == ".pdf":
@@ -290,57 +290,87 @@ def parse_namelist_from_file(file_bytes: io.BytesIO, school_dep: str):
             extracted_text = extract_text(file_bytes)
             if not extracted_text.strip():
                 return {"error": "PDF 無文字層或為掃描圖片"}
-            content_parts = [{"text": extracted_text}]
+            
+            # PDF 只傳送純文字給 Gemini
+            prompt = (
+                f"請先檢查這份 PDF 文字內容是否包含「{school_dep}」的名單。\n"
+                f"若內容未包含「{school_dep}」的名單，請**直接回傳純文字訊息：「檔案未包含{school_dep}名單」**。\n"
+                "若包含，請繼續並**只提取該系所的名單**，忽略其他系所資訊。\n\n"
+                "這份資料是由 PDF 轉換而來的純文字，請容忍排版錯亂或多餘空白，不需理會頁碼、註解、或頁首頁尾。\n"
+                "若為『聯合招生、共同招生』名單且未明確標示系所，可放寬限制，若系所合理屬於該名單則繼續提取。\n\n"
+                "重要提醒：請檢查名單中是否包含真實的學生人名。\n"
+                "- 若名單主要由 准考證號碼、學號、編號 等組成，而沒有實際的中文人名，請標記 'names_available': false。\n"
+                "- 若有實際人名（即使有遮蔽符），請標記 'names_available': true。\n\n"
+                "以下是提取名單的具體要求：\n"
+                "這是一份台灣大學或研究所的學生名單。\n"
+                "請提取所有學生人名或編號。\n"
+                "隱私遮蔽符（X、O、○、●、□、■、* 等）一律替換為星號 *。\n"
+                "若部分名字未被遮蔽但根據模式可推測應有遮蔽，請補上 *。\n"
+                "例如：張*睿、林*茹、盧嘉 → 合理輸出為 張*睿、林*茹、盧*嘉。\n\n"
+                "輸出格式：純 JSON，{'names': ['姓名1','姓名2',...], 'names_available': true/false}\n"
+                "不要加註解、不要 ```json。\n\n"
+                f"PDF 文字內容：\n{extracted_text}"
+            )
+            
+            config = GenerateContentConfig(temperature=0.0, max_output_tokens=2048)
+            
+            response = client.models.generate_content(
+                model=MODEL_NAME,
+                contents=prompt,
+                config=config
+            )
+            
         except Exception as e:
             return {"error": f"PDF 文字層提取失敗: {str(e)}"}
 
     else:
-        # 非 PDF 類型，轉成 base64 並傳給 Gemini
+        # 非 PDF 類型（圖片、Excel），轉成 base64 並傳給 Gemini
         file_data = base64.standard_b64encode(file_content).decode("utf-8")
-        content_parts = [
-            {
-                "inline_data": {
-                    "mime_type": mime_type,
-                    "data": file_data,
-                }
-            }
-        ]
-
-    # === Step 2: prompt（稍作修改，讓模型知道這是文字層） ===
-    prompt = (
-        f"請先檢查這份資料內容是否包含「{school_dep}」的名單。\n"
-        f"若資料未包含「{school_dep}」的名單，請**直接回傳純文字訊息：「檔案未包含{school_dep}名單」**。\n"
-        "若包含，請繼續並**只提取該系所的名單**，忽略其他系所資訊。\n\n"
-        "若這份資料是由 PDF 轉換而來的純文字，請容忍排版錯亂或多餘空白，不需理會頁碼、註解、或頁首頁尾。\n"
-        "若為『聯合招生、共同招生』名單且未明確標示系所，可放寬限制，若系所合理屬於該名單則繼續提取。\n\n"
-        "重要提醒：請檢查名單中是否包含真實的學生人名。\n"
-        "- 若名單主要由 准考證號碼、學號、編號 等組成，而沒有實際的中文人名，請標記 'names_available': false。\n"
-        "- 若有實際人名（即使有遮蔽符），請標記 'names_available': true。\n\n"
-        "以下是提取名單的具體要求：\n"
-        "這是一份台灣大學或研究所的學生名單。\n"
-        "請提取所有學生人名或編號。\n"
-        "隱私遮蔽符（X、O、○、●、□、■、* 等）一律替換為星號 *。\n"
-        "若部分名字未被遮蔽但根據模式可推測應有遮蔽，請補上 *。\n"
-        "例如：張*睿、林*茹、盧嘉 → 合理輸出為 張*睿、林*茹、盧*嘉。\n\n"
-        "輸出格式：純 JSON，{'names': ['姓名1','姓名2',...], 'names_available': true/false}\n"
-        "不要加註解、不要 ```json。\n"
-    )
-
-    config = GenerateContentConfig(temperature=0.0)
-
-    try:
-        # === Step 3: 組合送出 ===
-        contents = [{
-            "role": "user",
-            "parts": content_parts + [{"text": prompt}]
-        }]
-
-        response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=contents,
-            config=config
+        
+        prompt = (
+            f"請先檢查這份資料內容是否包含「{school_dep}」的名單。\n"
+            f"若資料未包含「{school_dep}」的名單，請**直接回傳純文字訊息：「檔案未包含{school_dep}名單」**。\n"
+            "若包含，請繼續並**只提取該系所的名單**，忽略其他系所資訊。\n\n"
+            "若為『聯合招生、共同招生』名單且未明確標示系所，可放寬限制，若系所合理屬於該名單則繼續提取。\n\n"
+            "重要提醒：請檢查名單中是否包含真實的學生人名。\n"
+            "- 若名單主要由 准考證號碼、學號、編號 等組成，而沒有實際的中文人名，請標記 'names_available': false。\n"
+            "- 若有實際人名（即使有遮蔽符），請標記 'names_available': true。\n\n"
+            "以下是提取名單的具體要求：\n"
+            "這是一份台灣大學或研究所的學生名單。\n"
+            "請提取所有學生人名或編號。\n"
+            "隱私遮蔽符（X、O、○、●、□、■、* 等）一律替換為星號 *。\n"
+            "若部分名字未被遮蔽但根據模式可推測應有遮蔽，請補上 *。\n"
+            "例如：張*睿、林*茹、盧嘉 → 合理輸出為 張*睿、林*茹、盧*嘉。\n\n"
+            "輸出格式：純 JSON，{'names': ['姓名1','姓名2',...], 'names_available': true/false}\n"
+            "不要加註解、不要 ```json。\n"
         )
+        
+        config = GenerateContentConfig(temperature=0.0, max_output_tokens=2048)
+        
+        try:
+            contents = [{
+                "role": "user",
+                "parts": [
+                    {
+                        "inline_data": {
+                            "mime_type": mime_type,
+                            "data": file_data,
+                        }
+                    },
+                    {"text": prompt}
+                ]
+            }]
 
+            response = client.models.generate_content(
+                model=MODEL_NAME,
+                contents=contents,
+                config=config
+            )
+        except Exception as e:
+            return {"error": f"API call failed: {str(e)}"}
+
+    # === Step 2: 處理回應（PDF 和非 PDF 共用） ===
+    try:
         raw_content = response.text.strip()
         expected_error_message = f"檔案未包含{school_dep}名單"
 
