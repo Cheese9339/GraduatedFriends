@@ -834,12 +834,22 @@ def api_user_department_stats():
             if row and row.get('namelist'):
                 try:
                     namelist_dict = json.loads(row['namelist'])
-                    deg_list_str = json.loads(namelist_dict.get(degree, '')).get("names")
-                except Exception:
+                    degree_data = namelist_dict.get(degree)
+                    
+                    if degree_data:
+                        if isinstance(degree_data, dict):
+                            deg_list_str = degree_data.get('names', '')
+                        else:
+                            # 舊格式：直接是字符串
+                            deg_list_str = degree_data
+                        
+                        if deg_list_str and isinstance(deg_list_str, str):
+                            namelist_count = len([n for n in deg_list_str.split(',') if n.strip()])
+                except Exception as e:
+                    # 如果解析失敗，嘗試將整個namelist作為舊格式處理
                     deg_list_str = row['namelist']
-
-                if deg_list_str and isinstance(deg_list_str, str):
-                    namelist_count = len([n for n in deg_list_str.split(',') if n.strip()])
+                    if deg_list_str and isinstance(deg_list_str, str):
+                        namelist_count = len([n for n in deg_list_str.split(',') if n.strip()])
 
             return jsonify({
                 "success": True,
