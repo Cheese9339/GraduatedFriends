@@ -14,21 +14,48 @@ import io
 import googleAI
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# 優先加載本地 .env 文件，否則加載 .env.local（開發環境）
 env_path = os.path.join(BASE_DIR, '.env')
-load_dotenv(env_path)
+if not os.path.exists(env_path):
+    env_path = os.path.join(BASE_DIR, '.env.local')
+
+# 強制重新加載，清除之前的環境變數
+load_dotenv(env_path, override=True)
+
+# 調試：打印加載的 .env 路徑
+if os.getenv("FLASK_ENV") == "development":
+    print(f"[DEBUG] 加載環境變數從: {env_path}")
+
 SECRET_KEY = os.getenv("SECRET_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+# 判斷是否為本地開發環境
+IS_LOCAL_DEV = os.getenv("FLASK_ENV") == "development" or os.getenv("DEBUG", "").lower() == "true"
+
 app = Flask(__name__)
-CORS(app, origins=[
-    "https://storage.googleapis.com",
-    "https://storage.googleapis.com/graduatedfriends"
-], supports_credentials=True)
+
+# 根據環境配置 CORS
+if IS_LOCAL_DEV:
+    # 本地開發：允許所有來源（便於測試）
+    CORS(app, supports_credentials=True)
+    print("[INFO] 本地開發模式 - 允許所有 CORS 來源")
+else:
+    # 生產環境：只允許特定來源
+    CORS(app, origins=[
+        "https://storage.googleapis.com",
+        "https://storage.googleapis.com/graduatedfriends"
+    ], supports_credentials=True)
+    print("[INFO] 生產模式 - 限制 CORS 來源")
+
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"sslmode": "require"},  # 確保 SSL
-    pool_pre_ping=True                     # 自動檢查連線是否可用
+    connect_args={"sslmode": "require"} if "localhost" not in DATABASE_URL else {},
+    pool_pre_ping=True
 )
+
+if IS_LOCAL_DEV:
+    print(f"[INFO] 資料庫連線: {'Neon (遠端)' if 'neon' in DATABASE_URL else '本地'}")
 
 # >>>>>>>>>>>>>>> register >>>>>>>>>>>>>>> #
 @app.route('/api/register', methods=['POST'])
@@ -543,9 +570,9 @@ def api_upload_namelist():
         names_str = ','.join(names)
         
         with engine.begin() as conn:
-            # 先查詢現有的 namelist
+            # 先查詢現有的 namelist 和 degree
             query_sql = text("""
-                SELECT namelist
+                SELECT namelist, degree
                 FROM schools
                 WHERE school = :school AND dep_name = :department
                 LIMIT 1
@@ -558,13 +585,7 @@ def api_upload_namelist():
             # 初始化或更新 namelist dict，保留其他 degree
             namelist_dict = {}
             if row and row['namelist']:
-                # try:
                 namelist_dict = json.loads(row['namelist'])
-                # except Exception:
-                #     # 若原本是逗號分隔字串，則存到 '預設' key
-                #     old_str = row['namelist']
-                #     if old_str.strip():
-                #         namelist_dict['預設'] = {"names": old_str, "has_names": True}
 
             # 只更新指定 degree 的名單（新格式：包含 names 和 has_names）
             namelist_dict[degree] = {
@@ -573,14 +594,30 @@ def api_upload_namelist():
             }
             namelist_json = json.dumps(namelist_dict, ensure_ascii=False)
 
-            # 更新資料庫
+            # 更新 degree 欄位：確保傳入的 degree 在 degree 欄位中
+            existing_degrees = ""
+            if row and row.get('degree'):
+                existing_degrees = row['degree']
+            
+            # 解析現有 degree（逗號分隔）
+            degree_list = [d.strip() for d in existing_degrees.split(',') if d.strip()]
+            
+            # 如果傳入的 degree 不在列表中，就加入
+            if degree not in degree_list:
+                degree_list.append(degree)
+            
+            # 重新組成逗號分隔字串
+            updated_degrees = ','.join(degree_list)
+
+            # 更新資料庫（同時更新 namelist 和 degree）
             update_sql = text("""
                 UPDATE schools
-                SET namelist = :namelist
+                SET namelist = :namelist, degree = :degree
                 WHERE school = :school AND dep_name = :department
             """)
             conn.execute(update_sql, {
                 "namelist": namelist_json,
+                "degree": updated_degrees,
                 "school": school,
                 "department": department
             })
@@ -1009,4 +1046,31 @@ def api_get_user_choices():
 
 # <<<<<<<<<<<<<<< schools / departments / lookup <<<<<<<<<<<<<<< #
 if __name__ == "__main__":
-    app.run(debug=True)
+    if IS_LOCAL_DEV:
+        print("\n" + "="*60)
+        print("🚀 本地開發伺服器啟動")
+        print("="*60)
+        print(f"📝 環境: {os.getenv('FLASK_ENV', 'development')}")
+        
+        # 顯示資料庫連線詳情（隱藏密碼）
+        db_url = DATABASE_URL
+        if db_url:
+            # 隱藏密碼部分
+            import re
+            masked_url = re.sub(r'://[^:]+:(.+?)@', r'://***:***@', db_url)
+            print(f"🗄️  資料庫: {masked_url}")
+        else:
+            print(f"🗄️  資料庫: ⚠️ 未設置 DATABASE_URL!")
+        
+        print(f"🌐 API: http://localhost:5000")
+        print(f"💾 前端（Live Server）: http://localhost:8000")
+        print("\n💡 提示:")
+        print("   1. 確保網路連線正常（Neon 位於 AWS）")
+        print("   2. 設置 GOOGLE_APPLICATION_CREDENTIALS 環境變數")
+        print("   3. 修改前端 API_BASE 為 http://localhost:5000")
+        print("   4. 若仍連接到 localhost，請重新啟動 Python（清除舊的 .env 緩存）")
+        print("="*60 + "\n")
+        app.run(debug=True, host='0.0.0.0', port=5000)
+    else:
+        print("[INFO] 生產模式 - 應通過 Gunicorn 或類似方式啟動")
+        app.run(debug=False)

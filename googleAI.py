@@ -18,19 +18,32 @@ from pdfminer.high_level import extract_text
 # 使用 Application Default Credentials (ADC)
 # 在 Cloud Run 上會自動使用服務帳戶的憑證，不需要 API KEY
 # 在本地開發時，可以通過環境變數 GOOGLE_APPLICATION_CREDENTIALS 或 gcloud auth application-default login 設置
-credentials, project = google.auth.default()
+try:
+    credentials, project = google.auth.default()
+except Exception as e:
+    print(f"[WARNING] Google auth.default() 失敗: {e}")
+    credentials = None
+    project = None
 
 # 設置專案和位置（從環境變數讀取，如果沒有則使用預設值）
 os.environ["GOOGLE_CLOUD_PROJECT"] = os.getenv("GOOGLE_CLOUD_PROJECT", project or "sinuous-origin-454613-h1")
 os.environ["GOOGLE_CLOUD_LOCATION"] = os.getenv("GOOGLE_CLOUD_LOCATION", "global")
-os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "True")
+
+# 本地開發時強制使用 Vertex AI（不使用 API KEY）
+GOOGLE_GENAI_USE_VERTEXAI = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "True").lower() == "true"
+os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "True" if GOOGLE_GENAI_USE_VERTEXAI else "False"
 
 
 def get_genai_client():
     """獲取配置好的 genai.Client，使用 Application Default Credentials"""
     # 當 GOOGLE_GENAI_USE_VERTEXAI=True 時，genai.Client 會自動使用 ADC
     # 如果需要明確傳遞憑證，可以通過 HttpOptions 傳遞
-    return genai.Client(http_options=HttpOptions(api_version="v1"))
+    try:
+        return genai.Client(http_options=HttpOptions(api_version="v1"))
+    except Exception as e:
+        print(f"[ERROR] 建立 Gemini 客戶端失敗: {e}")
+        print("[INFO] 請設置 GOOGLE_APPLICATION_CREDENTIALS 環境變數或執行 gcloud auth application-default login")
+        raise
 
 COMMON_USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -46,11 +59,40 @@ RATE_LIMIT_DELAY = 1
 
 
 def clean_markdown_json(raw_text):
-    """清理 Markdown 格式的 JSON"""
-    match = re.search(r'```(?:json)?\s*({.*?})\s*```', raw_text, re.DOTALL)
+    """清理 Markdown 格式的 JSON，並修復常見的格式問題"""
+    if not raw_text:
+        return None
+    
+    raw_text = raw_text.strip()
+    
+    # 方式 1：從 markdown 程式碼塊中提取
+    match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', raw_text, re.DOTALL)
     if match:
         return match.group(1)
-    return raw_text.strip()
+    
+    # 方式 2：直接找第一個 { 和最後一個 }
+    start = raw_text.find('{')
+    end = raw_text.rfind('}')
+    if start != -1 and end != -1 and start < end:
+        json_str = raw_text[start:end+1]
+        
+        # 修復常見的 JSON 格式問題
+        # 移除未轉義的換行符
+        json_str = json_str.replace('\n', ' ').replace('\r', ' ')
+        
+        # 修復雙引號問題（例如 "names": ["a", "b"] 中間的特殊字符）
+        # 使用更寬容的方式：允許在字符串中包含某些特殊字符
+        try:
+            # 嘗試直接解析
+            json.loads(json_str)
+            return json_str
+        except json.JSONDecodeError:
+            # 如果失敗，嘗試修復
+            # 移除可能導致問題的控制字符
+            json_str = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', json_str)
+            return json_str
+    
+    return raw_text
 
 
 def fetch_html_with_retry(url):
@@ -195,27 +237,22 @@ def parse_namelist_from_url(url, school_dep):
     MODEL_NAME = "gemini-2.5-flash"
     
     prompt = (
-        f"你是名單提取專家。請檢查這份網頁內容是否包含「{school_dep}」的名單。\n\n"
-        "**重要：無論是否找到名單，都必須以 JSON 格式回傳，格式如下：**\n"
-        "成功找到名單：{\"success\": true, \"names\": [\"姓名1\", \"姓名2\", ...], \"names_available\": true/false}\n"
-        "未找到該系所名單：{\"success\": false, \"reason\": \"未找到{school_dep}名單\"}\n\n"
-        "若包含「{school_dep}」的名單，請繼續並**只提取該系所的名單**，忽略網頁中其他系所資訊。\n\n"
-        "若出現以下任一情況，視為包含「{school_dep}」並繼續提取：\n"
-        "1. 名單屬於『聯合招生』或『共同招生』形式\n"
-        "2. 網頁未明確標示系所，但將該系所視為名單的一部分「不算荒謬」\n\n"
-        "**檢查名單中是否包含真實人名：**\n"
-        "- 若主要由 准考證號碼、學號、編號 組成，無實際中文人名 → 'names_available': false\n"
-        "- 若有實際人名（即使被遮蔽符遮蔽）→ 'names_available': true\n\n"
-        "**提取名單的要求：**\n"
-        "1. 提取所有學生人名或編號\n"
-        "2. 隱私遮蔽符（X、O、○、●、□、■、* 等）一律替換為星號 *\n"
-        "3. 若部分名字未被遮蔽但根據模式可推測應有遮蔽，請補上 *\n"
-        "   例如：張*睿、林*茹、盧嘉 → 應輸出為 張*睿、林*茹、盧*嘉\n\n"
-        "**重點：直接輸出純 JSON，不要任何文字說明，不要 ```json 標記。**\n\n"
+        f"從這份網頁內容中提取「{school_dep}」的名單。\n\n"
+        "輸出 JSON（無其他文字）：\n"
+        f"找到名單：{{\"success\": true, \"names\": [\"名1\", \"名2\"], \"names_available\": true}}\n"
+        f"未找到或是別系所：{{\"success\": false, \"reason\": \"未找到 {school_dep} 名單\"}}\n\n"
+        "指示：\n"
+        "1. 若網頁明確標示是 {school_dep} 或包含 {school_dep} 的名單→提取\n"
+        "2. 若網頁完全沒標示系所，但只有名字+編號，且無任何其他系所標記→視為該系所名單，提取\n"
+        "3. 若網頁清晰標示是【其他系所】的名單→拒絕（返回 success: false）\n"
+        "4. 聯合招生或共同招生時，若清晰標示招生單位包含此系所，則提取\n"
+        "5. 遮蔽符（X、○、●等）轉為星號 *（例：張*睿）\n"
+        "6. names_available：若名單含真實人名→true，只有准考證號碼→false\n"
+        "7. 只輸出 JSON，無須說明\n\n"
         "網頁內容：\n" + text_content
     )
     
-    config = GenerateContentConfig(temperature=0.0, max_output_tokens=1024)
+    config = GenerateContentConfig(temperature=0.0)
     
     try:
         response = client.models.generate_content(
@@ -223,6 +260,11 @@ def parse_namelist_from_url(url, school_dep):
             contents=prompt,
             config=config
         )
+        
+        # 檢查 response 物件和 text 屬性
+        if not hasattr(response, 'text') or response.text is None:
+            return {"error": f"API 回應格式無效: {type(response)}"}
+        
         raw_content = response.text.strip()
         
         # 檢查回應是否為空
@@ -251,8 +293,8 @@ def parse_namelist_from_url(url, school_dep):
     except json.JSONDecodeError as e:
         return {
             "error": f"JSON parse failed: {str(e)}",
-            "raw_content": raw_content[:500] if 'raw_content' in locals() else "(empty)",
-            "cleaned": clean_json_str[:500] if 'clean_json_str' in locals() else "(not cleaned)"
+            "raw_content": raw_content[:500] if 'raw_content' in locals() and raw_content else "(empty)",
+            "cleaned": clean_json_str[:500] if 'clean_json_str' in locals() and clean_json_str else "(not cleaned)"
         }
     except Exception as e:
         return {"error": f"API call failed: {str(e)}"}
@@ -299,33 +341,28 @@ def parse_namelist_from_file(file_bytes: io.BytesIO, school_dep: str):
             # 直接從記憶體中提取 PDF 文字層
             file_bytes.seek(0)
             extracted_text = extract_text(file_bytes)
+            print(extracted_text)
             if not extracted_text.strip():
                 return {"error": "PDF 無文字層或為掃描圖片"}
             
             # PDF 只傳送純文字給 Gemini
             prompt = (
-                f"你是名單提取專家。請檢查這份 PDF 文字內容是否包含「{school_dep}」的名單。\n\n"
-                "**重要：無論是否找到名單，都必須以 JSON 格式回傳，格式如下：**\n"
-                "成功找到名單：{\"success\": true, \"names\": [\"姓名1\", \"姓名2\", ...], \"names_available\": true/false}\n"
-                "未找到該系所名單：{\"success\": false, \"reason\": \"未找到{school_dep}名單\"}\n\n"
-                "若包含「{school_dep}」的名單，請繼續並**只提取該系所的名單**，忽略其他系所資訊。\n"
-                "這份資料是由 PDF 轉換而來的純文字，請容忍排版錯亂、多餘空白、頁碼、註解、頁首頁尾。\n\n"
-                "若出現以下任一情況，視為包含「{school_dep}」並繼續提取：\n"
-                "1. 名單屬於『聯合招生』或『共同招生』形式\n"
-                "2. PDF 未明確標示系所，但將該系所視為名單的一部分「不算荒謬」\n\n"
-                "**檢查名單中是否包含真實人名：**\n"
-                "- 若主要由 准考證號碼、學號、編號 組成，無實際中文人名 → 'names_available': false\n"
-                "- 若有實際人名（即使被遮蔽符遮蔽）→ 'names_available': true\n\n"
-                "**提取名單的要求：**\n"
-                "1. 提取所有學生人名或編號\n"
-                "2. 隱私遮蔽符（X、O、○、●、□、■、* 等）一律替換為星號 *\n"
-                "3. 若部分名字未被遮蔽但根據模式可推測應有遮蔽，請補上 *\n"
-                "   例如：張*睿、林*茹、盧嘉 → 應輸出為 張*睿、林*茹、盧*嘉\n\n"
-                "**重點：直接輸出純 JSON，不要任何文字說明，不要 ```json 標記。**\n\n"
-                f"PDF 文字內容：\n{extracted_text}"
+                f"從這份 PDF 文字中提取「{school_dep}」的名單。\n\n"
+                "輸出 JSON（無其他文字）：\n"
+                f"找到名單：{{\"success\": true, \"names\": [\"名1\", \"名2\"], \"names_available\": true}}\n"
+                f"未找到或是別系所：{{\"success\": false, \"reason\": \"未找到 {school_dep} 名單\"}}\n\n"
+                "指示：\n"
+                "1. 若文件明確標示是 {school_dep} 或包含 {school_dep} 的名單→提取\n"
+                "2. 若文件完全沒標示系所，但只有名字+編號，且無任何其他系所標記→視為該系所名單，提取\n"
+                "3. 若文件清晰標示是【其他系所】的名單→拒絕（返回 success: false）\n"
+                "4. 聯合招生或共同招生時，若清晰標示招生單位包含此系所，則提取\n"
+                "5. 遮蔽符（X、○、●等）轉為星號 *（例：張*睿）\n"
+                "6. names_available：若名單含真實人名→true，只有准考證號碼→false\n"
+                "7. 只輸出 JSON，無須說明\n\n"
+                f"PDF 文字：\n{extracted_text}"
             )
             
-            config = GenerateContentConfig(temperature=0.0, max_output_tokens=2048)
+            config = GenerateContentConfig(temperature=0.0)
             
             response = client.models.generate_content(
                 model=MODEL_NAME,
@@ -341,27 +378,21 @@ def parse_namelist_from_file(file_bytes: io.BytesIO, school_dep: str):
         file_data = base64.standard_b64encode(file_content).decode("utf-8")
         
         prompt = (
-            f"你是名單提取專家。請檢查這份資料內容是否包含「{school_dep}」的名單。\n\n"
-            "**重要：無論是否找到名單，都必須以 JSON 格式回傳，格式如下：**\n"
-            "成功找到名單：{\"success\": true, \"names\": [\"姓名1\", \"姓名2\", ...], \"names_available\": true/false}\n"
-            "未找到該系所名單：{\"success\": false, \"reason\": \"未找到{school_dep}名單\"}\n\n"
-            "若包含「{school_dep}」的名單，請繼續並**只提取該系所的名單**，忽略其他系所資訊。\n"
-            "請容忍排版錯亂、多餘空白。\n\n"
-            "若出現以下任一情況，視為包含「{school_dep}」並繼續提取：\n"
-            "1. 名單屬於『聯合招生』或『共同招生』形式\n"
-            "2. 資料未明確標示系所，但將該系所視為名單的一部分「不算荒謬」\n\n"
-            "**檢查名單中是否包含真實人名：**\n"
-            "- 若主要由 准考證號碼、學號、編號 組成，無實際中文人名 → 'names_available': false\n"
-            "- 若有實際人名（即使被遮蔽符遮蔽）→ 'names_available': true\n\n"
-            "**提取名單的要求：**\n"
-            "1. 提取所有學生人名或編號\n"
-            "2. 隱私遮蔽符（X、O、○、●、□、■、* 等）一律替換為星號 *\n"
-            "3. 若部分名字未被遮蔽但根據模式可推測應有遮蔽，請補上 *\n"
-            "   例如：張*睿、林*茹、盧嘉 → 應輸出為 張*睿、林*茹、盧*嘉\n\n"
-            "**重點：直接輸出純 JSON，不要任何文字說明，不要 ```json 標記。**\n"
+            f"從這份資料中提取「{school_dep}」的名單。\n\n"
+            "輸出 JSON（無其他文字）：\n"
+            f"找到名單：{{\"success\": true, \"names\": [\"名1\", \"名2\"], \"names_available\": true}}\n"
+            f"未找到或是別系所：{{\"success\": false, \"reason\": \"未找到 {school_dep} 名單\"}}\n\n"
+            "指示：\n"
+            "1. 若資料明確標示是 {school_dep} 或包含 {school_dep} 的名單→提取\n"
+            "2. 若資料完全沒標示系所，但只有名字+編號，且無任何其他系所標記→視為該系所名單，提取\n"
+            "3. 若資料清晰標示是【其他系所】的名單→拒絕（返回 success: false）\n"
+            "4. 聯合招生或共同招生時，若清晰標示招生單位包含此系所，則提取\n"
+            "5. 遮蔽符（X、○、●等）轉為星號 *（例：張*睿）\n"
+            "6. names_available：若名單含真實人名→true，只有准考證號碼→false\n"
+            "7. 只輸出 JSON，無須說明"
         )
         
-        config = GenerateContentConfig(temperature=0.0, max_output_tokens=2048)
+        config = GenerateContentConfig(temperature=0.0)
         
         try:
             contents = [{
@@ -385,26 +416,32 @@ def parse_namelist_from_file(file_bytes: io.BytesIO, school_dep: str):
         except Exception as e:
             return {"error": f"API call failed: {str(e)}"}
 
+    print(response)
     # === Step 2: 處理回應（PDF 和非 PDF 共用） ===
     if not response:
         return {"error": "未收到 API 回應"}
     
     try:
-        raw_content = response.text.strip()
+        # 檢查 response 物件和 text 屬性
+        if not hasattr(response, 'text') or response.text is None:
+            return {"error": f"API 回應格式無效: {type(response)}"}
         
+        raw_content = response.text.strip()
+        print(raw_content)
+        print("=====")
         # 檢查回應是否為空
         if not raw_content:
             return {"error": "API 回應為空"}
 
         # 清理 markdown 格式並解析 JSON
         clean_json_str = clean_markdown_json(raw_content)
-        
+        print(clean_json_str)
         # 再次檢查清理後是否為空
         if not clean_json_str:
             return {"error": "無法解析 API 回應"}
         
         parsed = json.loads(clean_json_str)
-
+        print(3)
         # 驗證回應格式
         if not isinstance(parsed, dict):
             return {"error": "回傳的 JSON 不是物件格式"}
@@ -424,13 +461,15 @@ def parse_namelist_from_file(file_bytes: io.BytesIO, school_dep: str):
     except json.JSONDecodeError as e:
         return {
             "error": f"JSON parse failed: {str(e)}",
-            "raw_content": raw_content[:500] if raw_content else "(empty)",
-            "cleaned": clean_json_str[:500] if 'clean_json_str' in locals() else "(not cleaned)"
+            "hint": "Gemini 可能返回了非標準 JSON 格式。請檢查以下內容：",
+            "raw_content": raw_content[:300] if 'raw_content' in locals() and raw_content else "(empty)",
+            "cleaned": clean_json_str[:300] if 'clean_json_str' in locals() and clean_json_str else "(not cleaned)",
+            "parse_error": str(e)
         }
     except Exception as e:
         return {
             "error": f"處理回應失敗: {str(e)}",
-            "raw_content": raw_content[:500] if raw_content else "(empty)"
+            "raw_content": raw_content[:500] if 'raw_content' in locals() and raw_content else "(empty)"
         }
 
 
