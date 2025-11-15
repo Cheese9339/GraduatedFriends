@@ -344,7 +344,6 @@ def parse_namelist_from_file(file_bytes: io.BytesIO, school_dep: str):
             print(extracted_text)
             if not extracted_text.strip():
                 return {"error": "PDF 無文字層或為掃描圖片"}
-            
             # PDF 只傳送純文字給 Gemini
             prompt = (
                 f"從這份 PDF 文字中提取「{school_dep}」的名單。\n\n"
@@ -356,27 +355,29 @@ def parse_namelist_from_file(file_bytes: io.BytesIO, school_dep: str):
                 "2. 若文件完全沒標示系所，但只有名字+編號，且無任何其他系所標記→視為該系所名單，提取\n"
                 "3. 若文件清晰標示是【其他系所】的名單→拒絕（返回 success: false）\n"
                 "4. 聯合招生或共同招生時，若清晰標示招生單位包含此系所，則提取\n"
-                "5. 遮蔽符（X、○、●等）轉為星號 *（例：張*睿）\n"
+                "5. 遮蔽符（X、○、●等）轉為星號 *（例：張*睿）且名字不會有空格\n"
                 "6. names_available：若名單含真實人名→true，只有准考證號碼→false\n"
                 "7. 只輸出 JSON，無須說明\n\n"
                 f"PDF 文字：\n{extracted_text}"
             )
-            
             config = GenerateContentConfig(temperature=0.0)
-            
             response = client.models.generate_content(
-                model=MODEL_NAME,
+                model="gemini-2.0-flash",
                 contents=prompt,
                 config=config
             )
-            
+            # 顯示 input/output token 數量
+            if hasattr(response, "usage_metadata"):
+                usage = response.usage_metadata
+                print(f"[Token] input: {getattr(usage, 'prompt_token_count', 'N/A')}, output: {getattr(usage, 'completion_token_count', 'N/A')}, total: {getattr(usage, 'total_token_count', 'N/A')}")
+            else:
+                print("[Token] 無法取得 token 數量資訊")
         except Exception as e:
             return {"error": f"PDF 文字層提取失敗或 API 呼叫失敗: {str(e)}"}
 
     else:
         # 非 PDF 類型（圖片、Excel），轉成 base64 並傳給 Gemini
         file_data = base64.standard_b64encode(file_content).decode("utf-8")
-        
         prompt = (
             f"從這份資料中提取「{school_dep}」的名單。\n\n"
             "輸出 JSON（無其他文字）：\n"
@@ -387,13 +388,11 @@ def parse_namelist_from_file(file_bytes: io.BytesIO, school_dep: str):
             "2. 若資料完全沒標示系所，但只有名字+編號，且無任何其他系所標記→視為該系所名單，提取\n"
             "3. 若資料清晰標示是【其他系所】的名單→拒絕（返回 success: false）\n"
             "4. 聯合招生或共同招生時，若清晰標示招生單位包含此系所，則提取\n"
-            "5. 遮蔽符（X、○、●等）轉為星號 *（例：張*睿）\n"
+            "5. 遮蔽符（X、○、●等）轉為星號 *（例：張*睿）且名字不會有空格\n"
             "6. names_available：若名單含真實人名→true，只有准考證號碼→false\n"
             "7. 只輸出 JSON，無須說明"
         )
-        
         config = GenerateContentConfig(temperature=0.0)
-        
         try:
             contents = [{
                 "role": "user",
@@ -407,12 +406,17 @@ def parse_namelist_from_file(file_bytes: io.BytesIO, school_dep: str):
                     {"text": prompt}
                 ]
             }]
-
             response = client.models.generate_content(
                 model=MODEL_NAME,
                 contents=contents,
                 config=config
             )
+            # 顯示 input/output token 數量
+            if hasattr(response, "usage_metadata"):
+                usage = response.usage_metadata
+                print(f"[Token] input: {getattr(usage, 'prompt_token_count', 'N/A')}, output: {getattr(usage, 'completion_token_count', 'N/A')}, total: {getattr(usage, 'total_token_count', 'N/A')}")
+            else:
+                print("[Token] 無法取得 token 數量資訊")
         except Exception as e:
             return {"error": f"API call failed: {str(e)}"}
 
