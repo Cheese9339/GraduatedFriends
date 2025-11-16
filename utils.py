@@ -3,7 +3,7 @@ def send_mail(email_address, mail_type, necessary_content):
     import smtplib
     from email.mime.text import MIMEText
 
-    # Gmail SMTP 設定
+    # Brevo SMTP 設定
     SMTP_SERVER = "smtp-relay.brevo.com"
     SMTP_PORT = 587
     SMTP_LOGIN = "9b5bbb001@smtp-brevo.com"
