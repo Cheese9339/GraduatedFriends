@@ -4,10 +4,10 @@ def send_mail(email_address, mail_type, necessary_content):
     from email.mime.text import MIMEText
 
     # Gmail SMTP 設定
-    SMTP_SERVER = "smtp.gmail.com"
+    SMTP_SERVER = "smtp.mailersend.net"
     SMTP_PORT = 587
-    SMTP_LOGIN = "tw.graduated.friends@gmail.com"
-    SMTP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")  # 你剛建立的應用程式密碼
+    SMTP_LOGIN = "MS_bW7dZl@test-eqvygm01zx8l0p7w.mlsender.net"
+    SMTP_PASSWORD = os.getenv("MAILER_SEND_API_KEY")  # 你剛建立的應用程式密碼
 
     if mail_type == "captcha":
         subject = "臺灣研究所透明平台 註冊驗證碼"
