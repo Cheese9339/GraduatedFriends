@@ -57,6 +57,19 @@ engine = create_engine(
 if IS_LOCAL_DEV:
     print(f"[INFO] 資料庫連線: {'Neon (遠端)' if 'neon' in DATABASE_URL else '本地'}")
 
+# Email 域名白名單（常見郵件服務）
+ALLOWED_EMAIL_DOMAINS = {
+    'gmail.com', 'outlook.com', 'hotmail.com', 'yahoo.com', 'yahoo.com.tw'
+}
+
+def is_valid_email_domain(email):
+    """檢查 email 是否使用允許的域名"""
+    if not email or '@' not in email:
+        return False
+    domain = email.split('@')[1].lower()
+    # 允許常見郵件服務或任何 .edu.tw 結尾的域名
+    return domain in ALLOWED_EMAIL_DOMAINS or domain.endswith('.edu.tw')
+
 # >>>>>>>>>>>>>>> register >>>>>>>>>>>>>>> #
 @app.route('/api/register', methods=['POST'])
 def register():
@@ -64,6 +77,14 @@ def register():
     username = data.get('name')
     email = data.get('email')
     password = data.get('password')
+    
+    # 檢查 email 域名是否允許
+    if not is_valid_email_domain(email):
+        return jsonify({
+            "success": False,
+            "message": "此電子郵件域名不被允許。請使用學校 .edu.tw 信箱或常見的郵件服務（Gmail、Outlook 等）"
+        }), 400
+    
     hashed_pw = generate_password_hash(password)  # 密碼 hash
     create_time = datetime.datetime.now(datetime.timezone.utc)
     verify_result, verify_result_code = register_verify_email(data)
@@ -99,6 +120,13 @@ def register_captcha_apply():
     data = request.get_json()
     email = data.get('email')
     create_time = datetime.datetime.now(datetime.timezone.utc)
+    
+    # 檢查 email 域名是否允許
+    if not is_valid_email_domain(email):
+        return jsonify({
+            "success": False,
+            "message": "此電子郵件域名不被允許。請使用學校 .edu.tw 信箱或常見的郵件服務（Gmail、Outlook 等）"
+        }), 400
 
     verification_code = str(np.random.randint(100000, 999999))
     # 插入資料
@@ -222,7 +250,10 @@ def register_verify_email(data):
                 WHERE id = :id
             """)
             conn.execute(update_verification, {"id": verification['id']})
-        return jsonify({"success": True, "message": "驗證成功"}), 200
+            return jsonify({"success": True, "message": "驗證成功"}), 200
+        else:
+            # 驗證碼不匹配
+            return jsonify({"success": False, "message": "驗證碼不正確"}), 400
 # <<<<<<<<<<<<<<< register <<<<<<<<<<<<<<< #
 
 # >>>>>>>>>>>>>>> login >>>>>>>>>>>>>>> #
