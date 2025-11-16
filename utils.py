@@ -4,17 +4,17 @@ def send_mail(email_address, mail_type, necessary_content):
     from email.mime.text import MIMEText
 
     # Gmail SMTP 設定
-    SMTP_SERVER = "smtp.mailersend.net"
+    SMTP_SERVER = "smtp-relay.brevo.com"
     SMTP_PORT = 587
-    SMTP_LOGIN = "MS_bW7dZl@test-eqvygm01zx8l0p7w.mlsender.net"
-    SMTP_PASSWORD = os.getenv("MAILER_SEND_API_KEY")  # 你剛建立的應用程式密碼
+    SMTP_LOGIN = "9b5bbb001@smtp-brevo.com"
+    SMTP_PASSWORD = os.getenv("BREVO_API_KEY")  # 你剛建立的應用程式密碼
 
     if mail_type == "captcha":
         subject = "臺灣研究所透明平台 註冊驗證碼"
         body = f"您好，您的驗證碼為：{necessary_content}，請在五分鐘內使用。"
 
         msg = MIMEText(body, "html", "utf-8")
-        msg["From"] = SMTP_LOGIN
+        msg["From"] = "tw.graduated.friends@gmail.com"
         msg["To"] = email_address
         msg["Subject"] = subject
 
@@ -22,7 +22,7 @@ def send_mail(email_address, mail_type, necessary_content):
             with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
                 server.starttls()
                 server.login(SMTP_LOGIN, SMTP_PASSWORD)
-                server.sendmail(SMTP_LOGIN, email_address, msg.as_string())
+                server.sendmail("tw.graduated.friends@gmail.com", email_address, msg.as_string())
             return True
         except Exception as e:
             print("寄信失敗:", e)
